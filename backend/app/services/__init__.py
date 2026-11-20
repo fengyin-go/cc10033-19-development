@@ -13,6 +13,7 @@ from app.services.star_query import StarQueryService
 from app.services.agg_summary import AggSummaryService
 from app.services.dim_bridge import DimBridgeService
 from app.services.etl_mapping import EtlMappingService
+from app.services.transform_verification import TransformVerificationService
 from app.services.snapshot_plan import SnapshotPlanService
 from app.services.model_lineage import ModelLineageService
 from app.services.conform_dim import ConformDimService
@@ -35,6 +36,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "agg_summary": AggSummaryService(),
     "dim_bridge": DimBridgeService(),
     "etl_mapping": EtlMappingService(),
+    "transform_verification": TransformVerificationService(),
     "snapshot_plan": SnapshotPlanService(),
     "model_lineage": ModelLineageService(),
     "conform_dim": ConformDimService(),

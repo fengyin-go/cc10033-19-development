@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.services.base import BaseModuleService
+from app.services.transform_verification import list_deliverable_partitions
 from app.store import store
 
 ENVIRONMENTS = {"开发", "预发", "生产", "灰度"}
@@ -107,6 +108,19 @@ class DeployPipelineService(BaseModuleService):
             entry["执行日志"] = f"前置检查通过-模型发布-数据回填完成 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
             entry["pending"] = False
 
+            # 登记部署实际消费的样本验证范围（只含通过验证的分区输出）
+            verification = check_result.get("sample_verification", {})
+            if verification.get("partitions"):
+                entry["_consumed_verification"] = {
+                    "partitions": [p["partition_value"] for p in verification["partitions"]],
+                    "batches": sorted({p["batch_id"] for p in verification["partitions"]}),
+                    "published_rows": sum(p["passed_count"] for p in verification["partitions"]),
+                    "rejected_rows": sum(p["rejected_count"] for p in verification["partitions"]),
+                }
+                entry["执行日志"] += (
+                    f"-消费验证批次{','.join(entry['_consumed_verification']['batches'])}"
+                )
+
             # 发布部署成功事件，触发snapshot_plan生成快照
             store.channel.publish("deploy.published", {
                 "task_name": entry["任务名称"],
@@ -114,6 +128,7 @@ class DeployPipelineService(BaseModuleService):
                 "environment": entry.get("部署环境", ""),
                 "deployed_at": datetime.now(timezone.utc).isoformat(),
                 "source_version": check_result.get("current_version", "v1.0"),
+                "consumed_verification": entry.get("_consumed_verification"),
                 "entry_id": entry_id,
             })
 
@@ -237,11 +252,51 @@ def _run_preflight_checks(entry: dict[str, Any]) -> dict[str, Any]:
     if not etl_ready:
         checks["all_passed"] = False
 
+    # 检查4: 样本转换验证——只承认实际通过验证且规则未过期的目标分区
+    verification = _sample_verification_check(target_model)
+    checks["items"].append({
+        "check": (
+            f"样本验证可交付分区({verification['deliverable_partitions']}个/"
+            f"覆盖{verification['verified_partitions']}个分区)"
+        ),
+        "passed": verification["passed"],
+    })
+    checks["sample_verification"] = verification
+    if not verification["passed"]:
+        checks["all_passed"] = False
+
     checks["detail"] = "；".join(
         f"{item['check']}: {'通过' if item['passed'] else '失败'}"
         for item in checks["items"]
     )
     return checks
+
+
+def _sample_verification_check(target_model: str) -> dict[str, Any]:
+    """从转换验证结果消费可交付分区，确认部署目标是否有合格样本输出。"""
+    deliverable = list_deliverable_partitions(target_model)
+    fresh = [item for item in deliverable if item["deliverable"] and not item["rule_stale"]]
+    stale = [item for item in deliverable if item["rule_stale"]]
+    return {
+        "passed": bool(fresh),
+        "verified_partitions": len({item["partition_value"] for item in deliverable}),
+        "deliverable_partitions": len(fresh),
+        "stale_partitions": len(stale),
+        "partitions": [
+            {
+                "batch_id": item["batch_id"],
+                "partition_value": item["partition_value"],
+                "passed_count": item["passed_count"],
+                "rejected_count": item["rejected_count"],
+                "rule_revision": item["rule_revision"],
+                "rule_fingerprint": item["rule_fingerprint"],
+            }
+            for item in fresh
+        ],
+        "rejected_batches": sorted({
+            item["batch_id"] for item in deliverable if item["rejected_count"] > 0
+        }),
+    }
 
 
 def _mock_etl_check(target_model: str) -> bool:

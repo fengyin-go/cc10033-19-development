@@ -124,6 +124,17 @@ export const MODULES: ModuleMeta[] = [
     metrics: ["规则总数", "已部署数", "废弃数"],
   },
   {
+    key: "transform_verification",
+    name: "转换验证结果",
+    entity: "验证批次",
+    desc: "基于ETL映射对样本分区逐行校验类型转换、必填字段和目标主键，支撑分区交付",
+    fields: ["批次编号", "映射规则", "目标表", "样本范围", "通过行数", "拒收行数", "验证状态"],
+    statuses: ["待验证", "部分通过", "全部通过", "全部拒收", "已交付", "已过期"],
+    actions: [],
+    actionTargets: {},
+    metrics: ["批次总数", "通过行数", "拒收行数"],
+  },
+  {
     key: "snapshot_plan",
     name: "快照计划",
     entity: "快照策略",

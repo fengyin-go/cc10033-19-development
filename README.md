@@ -61,6 +61,7 @@ npm run dev
 | 汇总构建 | `agg_summary` | 汇总表 | 汇总名称、源事实表、汇总维度 |
 | 桥接关联 | `dim_bridge` | 桥接表 | 桥接名称、多对多维度、关联事实 |
 | ETL映射 | `etl_mapping` | 映射规则 | 规则名称、源表、目标表 |
+| 转换验证结果 | `transform_verification` | 验证批次 | 批次编号、映射规则、样本范围、通过/拒收行数 |
 | 快照计划 | `snapshot_plan` | 快照策略 | 策略名称、目标表、快照周期 |
 | 模型血缘 | `model_lineage` | 依赖关系 | 关系ID、上游模型、下游模型 |
 | 一致性维度 | `conform_dim` | 标准维度 | 标准名称、维度主题、标准键值 |
@@ -78,6 +79,21 @@ npm run dev
   `frontend/src/domain/<模块>.ts`，用于承载真实业务差异并维持36题位容量。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+## 转换验证与分区交付链路
+
+ETL 映射在表达式测试之外，提供面向批量交付的逐行转换验证（`transform_verification`）：
+
+1. `POST /api/etl-mappings/{mapping_id}/verification-batches` 提交样本批次，
+   逐行执行**类型转换、必填字段、目标主键**三类规则；无效目标主键的记录一律拒收，
+   不计入成功行。批次记录规则修订版本、规则指纹与样本范围（源记录标识、分区）。
+2. `GET .../verification-batches/{batch_id}/rows` 逐条查回失败原因；
+   样本修正后可重新提交，`POST .../verification-batches/compare` 按源记录标识对比前后结果。
+3. 映射规则被 `PATCH /api/etl-mappings/{mapping_id}` 修改后修订号递增、指纹变化，
+   历史批次自动标记 `rule_stale=true` 且交付被 409 拦截，杜绝“测旧规则、交新规则”。
+4. 部署流水线通过 `GET /api/etl-mappings/deliverable-partitions` 只消费实际通过验证的
+   分区输出（含规则依据），`POST .../deliver` 登记实际发布数据范围与被拒收的行；
+   拒收行保留源记录标识，`POST /api/etl-mappings/deliveries/{id}/rollback` 可回滚重测。
 
 领域：数据工程
 子方向：数仓与数据湖
